@@ -225,7 +225,15 @@ class MainWindow(QtWidgets.QWidget):
         # Load initial data
         self._load_miner_key()
         self._populate_device_selectors()
-        self._load_partner_approvals()
+        # Delay gui_config.enc load to let the service finish writing it.
+        def _deferred_load_gui_config() -> None:
+            self._load_partner_approvals()
+            try:
+                from .helpers.rewards import update_rewards_hint
+                update_rewards_hint(self)
+            except Exception:
+                pass
+        QtCore.QTimer.singleShot(10000, _deferred_load_gui_config)
 
         # Measurements now read via CSV polling in LiveData/DataHistory; no JSON polling timer needed
         self._load_status_data()
@@ -807,7 +815,8 @@ class MainWindow(QtWidgets.QWidget):
         mac_mismatch = week_doc.get("mac_mismatch")
         online_status = week_doc.get("online_status")
 
-        # Gates are satisfied when both fields have been set by the backend
+        # Toggles unlock as soon as mac + online are known so users can
+        # enable tools before the first reward slot lands.
         mac_known = mac_mismatch is not None
         online_known = bool(online_status)  # not None and not ""
 
@@ -1406,6 +1415,12 @@ class MainWindow(QtWidgets.QWidget):
         if not any_pending:
             if rewards:
                 footer = f"{footer} - {rewards}"
+            elif effective_mult is None:
+                # Online but no reward data yet (days:{}, no week_so_far)
+                footer = (
+                    f"{footer} - Current Rewards Multiplier: "
+                    f"<span style='color:#6f7a88;'>pending first reward slot...</span>"
+                )
             if week_mult_text:
                 footer = f"{footer} | {week_mult_text}"
         
@@ -2513,7 +2528,7 @@ class MainWindow(QtWidgets.QWidget):
                 self._poll_aem_live_data()
                 return
             
-            # Read API availability + lastUpdated from weekly JSON (applies to all miners)
+            # Read API availability + lastUpdated + mac_address from weekly JSON (applies to all miners)
             api_available = None
             last_updated = None
             try:
@@ -2524,6 +2539,11 @@ class MainWindow(QtWidgets.QWidget):
                 if isinstance(week_doc, dict):
                     api_available = week_doc.get("api_available")
                     last_updated = week_doc.get("lastUpdated")
+                    # Keep MAC label in sync with weekly JSON
+                    mac_address = week_doc.get("mac_address")
+                    if hasattr(self, 'macValueLabel'):
+                        self.macValueLabel.setText(str(mac_address) if mac_address else "-")
+                    self.activeMacAddress = mac_address or None
             except Exception:
                 pass
 
@@ -2546,16 +2566,23 @@ class MainWindow(QtWidgets.QWidget):
             from miner_GUI.utils.csv_reader import read_last_line
             from miner_GUI.utils.data import data_dir_gui
 
-            # Get mac_mismatch, api_available, and lastUpdated from weekly JSON
+            # Get mac_address, mac_mismatch, api_available, and lastUpdated from weekly JSON
+            mac_address = None
             mac_mismatch = None
             api_available = None
             last_updated = None
             today = datetime.datetime.utcnow().date()
             week_doc = load_status_week_for_date(today)
             if isinstance(week_doc, dict):
+                mac_address = week_doc.get("mac_address")
                 mac_mismatch = week_doc.get("mac_mismatch")
                 api_available = week_doc.get("api_available")
                 last_updated = week_doc.get("lastUpdated")
+
+            # Keep MAC label in sync with weekly JSON
+            if hasattr(self, 'macValueLabel'):
+                self.macValueLabel.setText(str(mac_address) if mac_address else "-")
+            self.activeMacAddress = mac_address or None
 
             # Read live status from CSV for faster updates (every 15 seconds)
             # CSV columns: timestamp, olostep_running, olostep_enabled, status

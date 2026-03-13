@@ -149,6 +149,7 @@ def update_rewards_hint(self) -> None:
         week_doc = load_status_week_for_date(today)
         if isinstance(week_doc, dict):
             # Extract and display MAC information from the weekly doc
+            mac_address = week_doc.get("mac_address")
             mac_registered = week_doc.get("mac_registered")
             mac_mismatch = week_doc.get("mac_mismatch")
 
@@ -176,11 +177,20 @@ def update_rewards_hint(self) -> None:
             try:
                 from miner_GUI.utils.data import log_step
                 log_step("mac_registered_from_week", {
+                    "mac_address": mac_address,
                     "mac_registered": mac_registered,
                     "mac_mismatch": mac_mismatch,
                     "pol_status": pol_status,
                     "verified": verified
                 })
+            except Exception:
+                pass
+
+            # MAC address display (from weekly JSON, replaces local detection)
+            try:
+                if hasattr(self, "macValueLabel"):
+                    self.macValueLabel.setText(str(mac_address) if mac_address else "-")
+                self.activeMacAddress = mac_address or None
             except Exception:
                 pass
 
@@ -304,12 +314,16 @@ def update_rewards_hint(self) -> None:
 
     # Build final rich text block
     # Max multiplier is shown without gating (online/MAC) to make toggles intuitive.
-    badge = self._multiplier_badge(max_multiplier)
-    rewards_line = (
-        f"Current Max Multiplier: {badge}"
-        if badge
-        else ("Current Max Multiplier: --" if max_multiplier is None else f"Current Max Multiplier: {max_multiplier:.2f}x")
-    )
+    # If we have tool config but no backend reward data yet, show "pending".
+    if current_multiplier is None and backend_mult is None:
+        rewards_line = "Current Max Multiplier: <span style='color:#6f7a88;'>pending first reward slot...</span>"
+    else:
+        badge = self._multiplier_badge(max_multiplier)
+        rewards_line = (
+            f"Current Max Multiplier: {badge}"
+            if badge
+            else f"Current Max Multiplier: {max_multiplier:.2f}x"
+        )
     if hasattr(self, "rewards_hint"):
         if is_mobile:
             html = f"{base_note} {status}<br><span style='font-size: 13pt; font-weight: bold;'>{rewards_line}</span>"
